@@ -6,38 +6,144 @@
 
 ## How It Works
 
-```
-User sends SOL ──► Pool Wallet
-                       │
-          Helius webhook fires
-                       │
-              Node.js server receives notification
-                       │
-              Server mints Kirat tokens to user's ATA
-                       │
-              User now holds liquid staking tokens
+### System Architecture
+The following diagram illustrates how the components of the centralized liquid staking token system interact:
 
-User redeems Kirat ──► Server burns tokens
-                       │
-              Server sends SOL back to user
-```
+```mermaid
+graph TD
+    %% Styling
+    classDef user fill:#6366F1,stroke:#4F46E5,stroke-width:2px,color:#FFF;
+    classDef backend fill:#10B981,stroke:#059669,stroke-width:2px,color:#FFF;
+    classDef solana fill:#8B5CF6,stroke:#7C3AED,stroke-width:2px,color:#FFF;
+    classDef helius fill:#F59E0B,stroke:#D97706,stroke-width:2px,color:#FFF;
+    classDef db fill:#EC4899,stroke:#DB2777,stroke-width:2px,color:#FFF;
 
-1. A user transfers SOL to the **pool wallet** address.
-2. [Helius](https://helius.dev) detects the transfer and sends an **enhanced webhook** to the Node.js backend.
-3. The server calculates the current exchange rate and **mints Kirat** SPL tokens to the sender's Associated Token Account (ATA).
-4. To **redeem**, the user submits a burn request. The server creates a transaction that burns the Kirat tokens and returns the equivalent SOL.
+    User([User Wallet]):::user
+    
+    subgraph backend_group [Node.js Backend Server]
+        Server[Express App]:::backend
+        PoolMgr[Pool State Manager]:::backend
+        StateFile[(pool-state.json)]:::db
+    end
+
+    subgraph solana_group [Solana Blockchain]
+        Devnet((Solana Devnet)):::solana
+        PoolWallet[Pool SOL Wallet]:::solana
+        TokenMint[Kirat Token Mint]:::solana
+    end
+
+    Helius[Helius Webhook Engine]:::helius
+
+    %% Deposit Flow
+    User -->|1. Transfer SOL| PoolWallet
+    Devnet -.->|2. Watch Transactions| Helius
+    Helius -->|3. POST /webhook| Server
+    Server -->|4. Mint Token| TokenMint
+    TokenMint -->|5. Deliver Kirat| User
+    Server -->|6. Save State| PoolMgr
+    PoolMgr --> StateFile
+
+    %% Redeem Flow
+    User -->|a. Request Redeem /redeem| Server
+    Server -->|b. Build co-signed Tx| User
+    User -->|c. Sign & Broadcast Tx| Devnet
+    Devnet -->|d. Burn Kirat & Release SOL| User
+```
 
 ---
 
-## Exchange Rate
+## Data Schema & ERD
 
-```
-exchangeRate = totalSOLInPool / totalKiratMinted
+Since this is a centralized liquid staking pool, state is stored on the local disk inside `pool-state.json`. The following entity-relationship diagram shows the schema structure:
+
+```mermaid
+erDiagram
+    PoolState ||--o{ DepositRecord : records
+    PoolState {
+        float totalSolDeposited "Accumulated SOL in the pool"
+        float totalKiratMinted "Accumulated Kirat tokens minted"
+    }
+    DepositRecord {
+        string txSignature PK "Solana Transaction Signature (Unique)"
+        string sender "User Wallet Address (Base58)"
+        float solAmount "SOL amount deposited"
+        float kiratMinted "Kirat amount minted"
+        int64 timestamp "Epoch timestamp in milliseconds"
+    }
 ```
 
-- Starts at **1 SOL = 1 Kirat** when the pool is empty.
-- As staking rewards accrue (SOL added to the pool without minting), the rate increases — each Kirat becomes worth more SOL.
-- **No minimum deposit** — any amount of SOL works.
+---
+
+## Detailed Sequence Flows
+
+### 1. Deposit & Mint Flow (Automated via Webhook)
+When a user deposits SOL into the pool, Helius detects the event and informs our server, which automates the minting of Kirat tokens at the current exchange rate:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User Wallet
+    participant Solana as Solana Devnet
+    participant Helius as Helius Webhook
+    participant Server as Express Server
+    participant State as pool-state.json
+
+    User->>Solana: Transfer SOL to Pool Wallet
+    Note over Solana: Tx is processed and finalized
+    Solana->>Helius: Enhanced webhook event triggered
+    Helius->>Server: POST /webhook (payload containing transfers)
+    activate Server
+    Server->>State: Read pool-state.json (current totals)
+    State-->>Server: Return PoolState
+    Server->>Server: Calculate exchange rate & Kirat to mint
+    Server->>Solana: mintTo (Mint Kirat to User's ATA, signed by Pool Keypair)
+    Solana-->>Server: Tx Signature returned & confirmed
+    Server->>State: Record deposit & update totals
+    Server-->>Helius: 200 OK Response
+    deactivate Server
+```
+
+### 2. Redeem & Burn Flow (Co-Signed Transaction)
+To withdraw SOL, the user initiates a redemption request. The server builds a transaction that burns Kirat and releases SOL, co-signing it before returning it to the user for final signing and broadcast:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User Wallet
+    participant Server as Express Server
+    participant State as pool-state.json
+    participant Solana as Solana Devnet
+
+    User->>Server: POST /redeem { userPublicKey, kiratAmount }
+    activate Server
+    Server->>State: Load pool-state.json & check exchange rate
+    State-->>Server: Exchange Rate & Pool Balance
+    Server->>Solana: Check User ATA balance
+    Solana-->>Server: ATA details (verified owner/balance)
+    Server->>Server: Build transaction:<br/>1. Burn Kirat from User ATA<br/>2. Transfer SOL from Pool Wallet to User
+    Server->>Server: Partial Sign with Pool Wallet Keypair
+    Server-->>User: Return Base64 Serialized Transaction
+    deactivate Server
+    User->>User: Sign transaction client-side (fee payer)
+    User->>Solana: Submit fully-signed transaction
+    Note over Solana: Executing on-chain...
+    Solana->>Solana: 1. Burn user's Kirat tokens
+    Solana->>Solana: 2. Transfer SOL from Pool to User Wallet
+    Note over User: User receives SOL & tokens are burned
+    Note over Server: Server state is updated upon next interaction or pool reload
+```
+
+---
+
+## Exchange Rate Formula
+
+The exchange rate is dynamic and updates automatically:
+
+$$\text{exchangeRate} = \frac{\text{totalSOLInPool}}{\text{totalKiratMinted}}$$
+
+- **Initial State**: Starts at **1 SOL = 1 Kirat** when no tokens have been minted yet.
+- **Accruing Value**: As staking rewards accrue (e.g. SOL added to the pool without minting new tokens), the rate increases — meaning each Kirat becomes worth more than 1 SOL.
+- **No minimum deposit**: Any amount of SOL is allowed.
 
 ---
 
