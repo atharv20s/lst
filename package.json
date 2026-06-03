@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "create-mint": "tsx src/token/createMint.ts",
-    "setup-webhook": "tsx scripts/setup-webhook.ts"
+    "setup-webhook": "tsx scripts/setup-webhook.ts",
+    "test-integration": "tsx scripts/test-integration.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.0",
