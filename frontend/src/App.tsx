@@ -335,7 +335,6 @@ const AppContent: React.FC = () => {
 
 export const App: React.FC = () => {
   // Initialize wallet adapter adapters
-  const network = WalletAdapterNetwork.Devnet;
   const endpoint = useMemo(() => 'https://api.devnet.solana.com', []);
   const wallets = useMemo(() => [
     new PhantomWalletAdapter(),
