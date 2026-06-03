@@ -5,6 +5,7 @@ import { getPoolKeypair } from './utils/solana.js';
 import { getPoolState } from './token/mint.js';
 import { createRedeemTransaction } from './token/burn.js';
 import webhookRouter from './webhook/handler.js';
+import chatRouter from './chat/handler.js';
 
 // ────────────────────────────────────────────────────
 //  ASCII Banner
@@ -30,10 +31,25 @@ const BANNER = `
 // ────────────────────────────────────────────────────
 const app = express();
 
+// ── CORS Middleware ─────────────────────────────────
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+    return;
+  }
+  next();
+});
+
 app.use(express.json());
 
 // ── Webhook ─────────────────────────────────────────
 app.use('/webhook', webhookRouter);
+
+// ── AI Chat Assistant ───────────────────────────────
+app.use('/api/chat', chatRouter);
 
 // ── Health check ────────────────────────────────────
 /**
