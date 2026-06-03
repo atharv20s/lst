@@ -1,0 +1,26 @@
+{
+  "name": "kirat-lst",
+  "version": "1.0.0",
+  "description": "Centralized Liquid Staking Token (Kirat) on Solana",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "create-mint": "tsx src/token/createMint.ts",
+    "setup-webhook": "tsx scripts/setup-webhook.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.0",
+    "@solana/spl-token": "^0.4.9",
+    "express": "^4.21.0",
+    "dotenv": "^16.4.5",
+    "bs58": "^6.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "tsx": "^4.19.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
